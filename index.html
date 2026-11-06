@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monitor MSR01</title>
+<style>
+  :root{
+    --bg:#f3f4f6; --panel:#ffffff; --text:#151a23; --muted:#5d6676; --line:#e2e5ea;
+    --accent:#0f766e; --accent-soft:#ccfbf1; --warn:#b45309; --warn-soft:#fef3c7;
+    --code-bg:#0f172a; --code-text:#e2e8f0; --key:#7dd3fc; --str:#86efac; --num:#fcd34d; --bool:#f9a8d4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0b0f16; --panel:#141a24; --text:#e6e9ef; --muted:#93a0b4; --line:#243041;
+      --accent:#2dd4bf; --accent-soft:#123a36; --warn:#fbbf24; --warn-soft:#3a2c0b; --code-bg:#070a10; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:14px 20px;position:sticky;top:0;z-index:5}
+  .barra{max-width:1100px;margin:auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  h1{font-size:18px;margin:0 auto 0 0;display:flex;align-items:center;gap:10px}
+  .punto{width:10px;height:10px;border-radius:50%;background:var(--muted)}
+  .punto.vivo{background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+  button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--text);
+    padding:6px 12px;border-radius:6px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  main{max-width:1100px;margin:auto;padding:16px 20px 40px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+  .stat b{display:block;font-size:20px;margin-top:2px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:12px;color:var(--muted)}
+  .ayuda{background:var(--warn-soft);color:var(--text);border-radius:8px;padding:12px 14px;font-size:14px;margin-bottom:16px}
+  .ayuda code{background:var(--panel);padding:2px 6px;border-radius:4px;word-break:break-all}
+  .msg{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden}
+  .msg.nuevo{animation:brillo 1.2s ease-out}
+  @keyframes brillo{from{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}}
+  .cab{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:10px 14px;font-size:13px;color:var(--muted);border-bottom:1px solid var(--line)}
+  .cab .id{color:var(--text);font-weight:600}
+  .tag{background:var(--accent-soft);color:var(--accent);border-radius:4px;padding:1px 7px;font-size:12px;font-weight:600}
+  .tag.no{background:var(--warn-soft);color:var(--warn)}
+  .tabs{display:flex;gap:4px;margin-left:auto}
+  .tabs button{padding:3px 9px;font-size:12px}
+  .tabs button.act{background:var(--accent);border-color:var(--accent);color:#fff}
+  pre{margin:0;padding:12px 14px;background:var(--code-bg);color:var(--code-text);font:13px/1.5 ui-monospace,Consolas,monospace;
+    white-space:pre-wrap;word-break:break-all;max-height:420px;overflow:auto}
+  .k{color:var(--key)} .s{color:var(--str)} .n{color:var(--num)} .b{color:var(--bool)}
+  .vacio{text-align:center;color:var(--muted);padding:50px 10px}
+</style>
+</head>
+<body>
+<header><div class="barra">
+  <h1><span class="punto" id="punto"></span>Monitor MSR01</h1>
+  <button id="pausa">Pausar</button>
+  <button id="descargar">Descargar .jsonl</button>
+  <button id="limpiar">Limpiar</button>
+</div></header>
+
+<main>
+  <div class="stats">
+    <div class="stat"><span>Mensajes recibidos</span><b id="total">0</b></div>
+    <div class="stat"><span>Último mensaje</span><b id="ultimo">—</b></div>
+    <div class="stat"><span>Hace</span><b id="hace">—</b></div>
+    <div class="stat"><span>Servidor activo desde</span><b id="inicio" style="font-size:14px">—</b></div>
+  </div>
+
+  <div class="ayuda" id="ayuda">
+    Configura en MinewLink → servidor <b>HTTP</b> con esta URL:
+    <code id="urlSensor"></code>
+  </div>
+
+  <div id="lista"><div class="vacio">Esperando datos del sensor…</div></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = '', ultimoId = 0, pausado = false, ultimaHora = null, cargados = [];
+try { token = localStorage.getItem('msr01_token') || ''; } catch(e) {}
+
+const q = () => token ? 'token=' + encodeURIComponent(token) : '';
+$('urlSensor').textContent = location.origin + '/msr01' + (token ? '?token=' + token : '');
+
+function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function color(json){
+  return esc(JSON.stringify(json, null, 2)).replace(
+    /("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(\.\d+)?([eE][+-]?\d+)?)/g,
+    m => /^"/.test(m) ? (/:$/.test(m) ? '<span class="k">'+m+'</span>' : '<span class="s">'+m+'</span>')
+       : /true|false|null/.test(m) ? '<span class="b">'+m+'</span>' : '<span class="n">'+m+'</span>');
+}
+
+function tarjeta(m, nuevo){
+  const d = document.createElement('div');
+  d.className = 'msg' + (nuevo ? ' nuevo' : '');
+  d.innerHTML =
+    '<div class="cab"><span class="id">#' + m.id + '</span><span>' + esc(m.hora) + '</span>' +
+    '<span>' + esc(m.metodo) + ' ' + esc(m.ruta) + (m.consulta ? '?' + esc(m.consulta) : '') + '</span>' +
+    '<span>' + m.bytes + ' bytes</span><span>desde ' + esc(m.ip) + '</span>' +
+    (m.es_json ? '<span class="tag">JSON</span>' : '<span class="tag no">' + (m.bytes ? 'texto' : 'vacío') + '</span>') +
+    '<div class="tabs"><button data-v="json"' + (m.es_json ? ' class="act"' : '') + '>Formateado</button>' +
+    '<button data-v="crudo"' + (m.es_json ? '' : ' class="act"') + '>Crudo</button>' +
+    '<button data-v="enc">Encabezados</button></div></div><pre></pre>';
+  const pre = d.querySelector('pre');
+  const vistas = {
+    json: () => m.es_json ? color(m.json) : esc(m.crudo || '(cuerpo vacío)'),
+    crudo: () => esc(m.crudo || '(cuerpo vacío)'),
+    enc: () => color(m.encabezados)
+  };
+  const mostrar = v => {
+    pre.innerHTML = vistas[v]();
+    d.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('act', b.dataset.v === v));
+  };
+  d.querySelectorAll('.tabs button').forEach(b => b.onclick = () => mostrar(b.dataset.v));
+  mostrar(m.es_json ? 'json' : 'crudo');
+  return d;
+}
+
+async function cargar(){
+  if (pausado) return;
+  try {
+    const r = await fetch('/api/mensajes?desde=' + ultimoId + '&' + q());
+    if (r.status === 401){
+      const t = prompt('Este monitor está protegido. Escribe el TOKEN:');
+      if (t !== null){ token = t.trim(); try{localStorage.setItem('msr01_token', token);}catch(e){} location.reload(); }
+      return;
+    }
+    const d = await r.json();
+    $('total').textContent = d.total;
+    $('inicio').textContent = d.inicio;
+    const lista = $('lista');
+    if (d.mensajes.length){
+      if (ultimoId === 0) lista.innerHTML = '';
+      const primeraCarga = ultimoId === 0;
+      [...d.mensajes].reverse().forEach(m => lista.prepend(tarjeta(m, !primeraCarga)));
+      ultimoId = d.mensajes[0].id;
+      ultimaHora = new Date(d.mensajes[0].hora.replace(' ', 'T') + '-05:00');
+      $('ultimo').textContent = d.mensajes[0].hora.slice(11);
+      while (lista.children.length > 300) lista.lastChild.remove();
+    }
+  } catch(e) {}
+}
+
+function reloj(){
+  if (!ultimaHora) return;
+  const s = Math.max(0, Math.round((Date.now() - ultimaHora) / 1000));
+  $('hace').textContent = s < 60 ? s + ' s' : s < 3600 ? Math.floor(s/60) + ' min' : Math.floor(s/3600) + ' h';
+  $('punto').classList.toggle('vivo', s < 180);
+}
+
+$('pausa').onclick = e => { pausado = !pausado; e.target.textContent = pausado ? 'Reanudar' : 'Pausar'; };
+$('descargar').onclick = () => location.href = '/api/descargar?' + q();
+$('limpiar').onclick = async () => {
+  if (!confirm('¿Borrar los mensajes mostrados?')) return;
+  await fetch('/api/limpiar?' + q(), {method:'POST'});
+  ultimoId = 0; $('lista').innerHTML = '<div class="vacio">Esperando datos del sensor…</div>';
+};
+
+cargar(); setInterval(cargar, 3000); setInterval(reloj, 1000);
+</script>
+</body>
+</html>

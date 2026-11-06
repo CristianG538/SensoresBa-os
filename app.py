@@ -32,7 +32,11 @@ TOKEN = os.environ.get("TOKEN", "").strip()
 MAX_MSG = int(os.environ.get("MAX_MSG", "500"))
 ARCHIVO = Path("datos_sensor.jsonl")
 BOGOTA = timezone(timedelta(hours=-5))
-INDEX = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+_BASE = Path(__file__).parent
+_HTML = next((p for p in (_BASE / "static" / "index.html", _BASE / "index.html") if p.exists()), None)
+INDEX = (_HTML.read_text(encoding="utf-8") if _HTML else
+         "<h1>Monitor MSR01</h1><p>Falta el archivo index.html (subelo junto a app.py). "
+         "El servidor igual esta recibiendo datos: ver <a href='/api/mensajes'>/api/mensajes</a>.</p>")
 
 mensajes = deque(maxlen=MAX_MSG)
 estado = {"total": 0, "inicio": datetime.now(BOGOTA).strftime("%Y-%m-%d %H:%M:%S")}
