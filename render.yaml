@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: monitor-msr01
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /salud
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: TOKEN
+        sync: false   # Render te pedira el valor al crear el servicio (puedes dejarlo vacio)
