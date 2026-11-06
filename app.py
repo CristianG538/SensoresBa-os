@@ -94,8 +94,13 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._enviar(200, lineas + "\n", "application/x-ndjson",
                                     {"Content-Disposition": "attachment; filename=msr01.jsonl"})
             return self._enviar(404, '{"error":"no encontrado"}')
-        # Algunos equipos hacen GET al probar el servidor: lo registramos tambien
-        return self._recibir()
+        if url.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+        # Las visitas GET (navegadores, vistas previas de WhatsApp, bots) NO se registran:
+        # solo nos interesa lo que el sensor envia por POST/PUT.
+        return self._enviar(404, '{"error":"usa POST para enviar datos"}')
 
     do_HEAD = do_GET
 
